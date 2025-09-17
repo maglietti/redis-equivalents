@@ -1,0 +1,25 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Apache Ignite 3.0 client dependency
+    implementation 'org.apache.ignite:ignite-client:3.0.0'
+
+    // Optional: Add logging implementation
+    implementation 'org.slf4j:slf4j-simple:2.0.7'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+application {
+    mainClass = 'IgniteKeyValueExample'
+}
