@@ -2,6 +2,16 @@ import org.apache.ignite.client.IgniteClient;
 import org.apache.ignite.table.KeyValueView;
 import org.apache.ignite.table.Tuple;
 
+/**
+ * Demonstrates Redis key-value operations using Apache Ignite 3 KeyValueView API.
+ *
+ * Maps Redis key-value operations to Ignite direct key operations:
+ * - Redis key = Ignite simple key
+ * - Redis value = Ignite value with single column table
+ *
+ * Uses single column primary key for Redis key-value semantics
+ * while leveraging Ignite's KeyValueView API pattern.
+ */
 public class IgniteKeyValueExample {
     public static void main(String[] args) throws Exception {
         // Connect to Ignite cluster

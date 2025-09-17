@@ -21,5 +21,47 @@ java {
 }
 
 application {
+    mainClass = 'RedisEquivalentDemo'
+}
+
+task runKeyValue(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis key-value GET/SET equivalents'
+    classpath = sourceSets.main.runtimeClasspath
     mainClass = 'IgniteKeyValueExample'
+}
+
+task runHash(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis hash HSET/HGET equivalents'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteHashExample'
+}
+
+task runList(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis list LPUSH/RPOP equivalents'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteListExample'
+}
+
+task runQueue(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis queue ENQUEUE/DEQUEUE equivalents'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteQueueExample'
+}
+
+task runSortedSet(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis sorted set ZADD/ZSCORE equivalents'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteSortedSetExample'
+}
+
+task runSet(type: JavaExec) {
+    group = 'application'
+    description = 'Run Redis set SADD/SISMEMBER equivalents'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteSetExample'
 }
