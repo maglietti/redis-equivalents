@@ -49,7 +49,7 @@ The key-value operations are available in multiple client implementations:
 - Python Client: `/modules/platforms/python/`
 - C++ Client: `/modules/platforms/cpp/`
 
-## Key Data Structures
+## Data Structures
 
 Each Redis data structure maps to a specific Ignite table schema using composite keys:
 
