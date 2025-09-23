@@ -22,13 +22,103 @@ Apache Ignite 3 provides Redis-like data structure operations through the Table 
 11. **Large Objects** - Document and file storage with compression
 12. **Record View** - Comparison with KeyValueView for data efficiency
 
-## Key Differences
+## Key Differences from Redis
 
 - No dedicated Redis API: Ignite 3 uses table-based approach with KeyValueView
 - Structured data: Works with typed tuples/POJOs rather than byte arrays
 - Schema required: Table creation with defined columns needed
 - ACID transactions: All operations support transactional semantics
 - SQL integration: Same data accessible via SQL queries
+
+| Aspect             | Redis                          | Apache Ignite 3                   |
+| ------------------ | ------------------------------ | --------------------------------- |
+| Data Model     | Key-value (byte arrays) | Structured tuples/POJOs           |
+| Schema         | Schema-less                    | Schema required (table creation)  |
+| Transactions   | Limited transaction support    | Full ACID transactions            |
+| Type Safety    | Binary data                    | Strong typing for keys and values |
+| Query Language | Redis commands only            | SQL integration available         |
+| Distribution   | Single-node or cluster         | Designed for distributed clusters |
+| Consistency    | Eventual consistency options   | Strong consistency guarantees     |
+
+## Client APIs
+
+The key-value operations are available in multiple client implementations:
+
+- Java Client: `/modules/client/` (primary implementation)
+- .NET Client: `/modules/platforms/dotnet/`
+- Python Client: `/modules/platforms/python/`
+- C++ Client: `/modules/platforms/cpp/`
+
+## Key Data Structures
+
+Each Redis data structure maps to a specific Ignite table schema using composite keys:
+
+### Key-Value Store
+- Table: `(key VARCHAR PRIMARY KEY, val VARCHAR)`
+- Pattern: Direct key lookup
+
+### Hash
+- Table: `(hash_name VARCHAR, field VARCHAR, val VARCHAR, PRIMARY KEY (hash_name, field))`
+- Pattern: Composite key (hash_name, field) for Redis hash field operations
+
+### List
+- Table: `(list_name VARCHAR, list_index INTEGER, val VARCHAR, PRIMARY KEY (list_name, list_index))`
+- Pattern: Composite key (list_name, index) with element shifting for Redis list semantics
+
+### Queue
+- Table: `(queue_name VARCHAR, seq BIGINT, val VARCHAR, PRIMARY KEY (queue_name, seq))`
+- Metadata: `(queue_name VARCHAR PRIMARY KEY, head_seq BIGINT, tail_seq BIGINT)`
+- Pattern: Composite key (queue_name, sequence) with head/tail pointers for efficient FIFO
+
+### Set
+- Table: `(set_name VARCHAR, member VARCHAR, dummy_val BOOLEAN DEFAULT true, PRIMARY KEY (set_name, member))`
+- Pattern: Composite key (set_name, member) with unique member constraint for Redis set semantics
+
+### Sorted Set
+- Table: `(zset_name VARCHAR, member VARCHAR, score DOUBLE, PRIMARY KEY (zset_name, member))`
+- Pattern: Composite key (zset_name, member) with score as value for Redis sorted set operations
+
+## Redis Command Mapping
+
+| Pattern | Redis Command | Ignite 3 Equivalent | Method |
+|---------|---------------|---------------------|--------|
+| Key-Value | `GET key` | `kvView.get(null, key)` | Retrieve value by key |
+| | `SET key value` | `kvView.put(null, key, value)` | Store key-value pair |
+| | `EXISTS key` | `kvView.contains(null, key)` | Check if key exists |
+| | `DEL key` | `kvView.remove(null, key)` | Remove key |
+| Hash | `HSET hash field value` | `kvView.put(null, compositeKey, value)` | Set hash field |
+| | `HGET hash field` | `kvView.get(null, compositeKey)` | Get hash field |
+| | `HEXISTS hash field` | `kvView.contains(null, compositeKey)` | Check hash field exists |
+| | `HDEL hash field` | `kvView.remove(null, compositeKey)` | Delete hash field |
+| List | `LPUSH list item` | `pushLeft(kvView, list, item)` | Add to list head |
+| | `RPUSH list item` | `pushRight(kvView, list, item)` | Add to list tail |
+| | `LINDEX list index` | `getByIndex(kvView, list, index)` | Get list element |
+| | `LPOP list` | `popLeft(kvView, list)` | Remove from list head |
+| Queue | `LPUSH queue item` | `enqueue(kvView, metaView, queue, item)` | Add to queue |
+| | `RPOP queue` | `dequeue(kvView, metaView, queue)` | Remove from queue |
+| Set | `SADD set member` | `sadd(kvView, set, member)` | Add unique member |
+| | `SISMEMBER set member` | `sismember(kvView, set, member)` | Check member exists |
+| | `SREM set member` | `srem(kvView, set, member)` | Remove member |
+| | `SCARD set` | `scard(kvView, set)` | Get member count |
+| | `SMEMBERS set` | `smembers(kvView, set)` | List all members |
+| | `SINTER set1 set2` | `sinter(kvView, set1, set2)` | Find common members |
+| Sorted Set | `ZADD zset score member` | `zadd(kvView, zset, member, score)` | Add scored member |
+| | `ZSCORE zset member` | `zscore(kvView, zset, member)` | Get member score |
+| | `ZINCRBY zset incr member` | `zincrby(kvView, zset, member, incr)` | Increment member score |
+| | `ZREM zset member` | `zrem(kvView, zset, member)` | Remove member |
+| Primitive Types | `SET counter 100` | `kvView.put(null, key, intValue)` | Store integer counter |
+| | `INCR counter` | `incrementCounter(kvView, "counter", 1)` | Increment counter value |
+| | `SET flag true` | `kvView.put(null, key, boolValue)` | Store boolean flag |
+| POJO Objects | `SET user:123 {json}` | `storeUser(kvView, "user:123", userObj)` | Store custom object |
+| | `GET user:123` | `getUser(kvView, "user:123")` | Retrieve custom object |
+| Colocation | `SET user:123 data` | `kvView.put(null, affinityKey, value)` | Store with affinity key |
+| Serialization | `SET msg {json}` | `storeJson(kvView, "msg", jsonData)` | Store JSON data |
+| | `SET obj {binary}` | `storeBinary(kvView, "obj", serialized)` | Store binary data |
+| Large Objects | `SET doc {content}` | `storeDocument(kvView, "doc", compressed)` | Store compressed document |
+| | `SET file {binary}` | `storeFile(kvView, "file", fileData)` | Store large file |
+| Record View | Multiple operations | `recordView.insert(null, record)` | Single record operation |
+
+---
 
 ## 1. Key-Value Store (IgniteKeyValueExample.java)
 
@@ -371,96 +461,6 @@ Tuple user = recordView.get(null, Tuple.create().set("user_id", "alice"));
 ```bash
 ./gradlew runRecordView
 ```
-
-## Key Differences from Redis
-
-| Aspect             | Redis                          | Apache Ignite 3                   |
-| ------------------ | ------------------------------ | --------------------------------- |
-| Data Model     | Key-value (byte arrays) | Structured tuples/POJOs           |
-| Schema         | Schema-less                    | Schema required (table creation)  |
-| Transactions   | Limited transaction support    | Full ACID transactions            |
-| Type Safety    | Binary data                    | Strong typing for keys and values |
-| Query Language | Redis commands only            | SQL integration available         |
-| Distribution   | Single-node or cluster         | Designed for distributed clusters |
-| Consistency    | Eventual consistency options   | Strong consistency guarantees     |
-
-## Client APIs
-
-The key-value operations are available in multiple client implementations:
-
-- Java Client: `/modules/client/` (primary implementation)
-- .NET Client: `/modules/platforms/dotnet/`
-- Python Client: `/modules/platforms/python/`
-- C++ Client: `/modules/platforms/cpp/`
-
-## Composite Key Patterns
-
-Each Redis data structure maps to a specific Ignite table schema using composite keys:
-
-### Key-Value Store
-- Table: `(key VARCHAR PRIMARY KEY, val VARCHAR)`
-- Pattern: Direct key lookup
-
-### Hash
-- Table: `(hash_name VARCHAR, field VARCHAR, val VARCHAR, PRIMARY KEY (hash_name, field))`
-- Pattern: Composite key (hash_name, field) for Redis hash field operations
-
-### List
-- Table: `(list_name VARCHAR, list_index INTEGER, val VARCHAR, PRIMARY KEY (list_name, list_index))`
-- Pattern: Composite key (list_name, index) with element shifting for Redis list semantics
-
-### Queue
-- Table: `(queue_name VARCHAR, seq BIGINT, val VARCHAR, PRIMARY KEY (queue_name, seq))`
-- Metadata: `(queue_name VARCHAR PRIMARY KEY, head_seq BIGINT, tail_seq BIGINT)`
-- Pattern: Composite key (queue_name, sequence) with head/tail pointers for efficient FIFO
-
-### Set
-- Table: `(set_name VARCHAR, member VARCHAR, dummy_val BOOLEAN DEFAULT true, PRIMARY KEY (set_name, member))`
-- Pattern: Composite key (set_name, member) with unique member constraint for Redis set semantics
-
-### Sorted Set
-- Table: `(zset_name VARCHAR, member VARCHAR, score DOUBLE, PRIMARY KEY (zset_name, member))`
-- Pattern: Composite key (zset_name, member) with score as value for Redis sorted set operations
-
-## Redis Command Mapping
-
-| Pattern | Redis Command | Ignite 3 Equivalent | Method |
-|---------|---------------|---------------------|--------|
-| Key-Value | `GET key` | `kvView.get(null, key)` | Retrieve value by key |
-| | `SET key value` | `kvView.put(null, key, value)` | Store key-value pair |
-| | `EXISTS key` | `kvView.contains(null, key)` | Check if key exists |
-| | `DEL key` | `kvView.remove(null, key)` | Remove key |
-| Hash | `HSET hash field value` | `kvView.put(null, compositeKey, value)` | Set hash field |
-| | `HGET hash field` | `kvView.get(null, compositeKey)` | Get hash field |
-| | `HEXISTS hash field` | `kvView.contains(null, compositeKey)` | Check hash field exists |
-| | `HDEL hash field` | `kvView.remove(null, compositeKey)` | Delete hash field |
-| List | `LPUSH list item` | `pushLeft(kvView, list, item)` | Add to list head |
-| | `RPUSH list item` | `pushRight(kvView, list, item)` | Add to list tail |
-| | `LINDEX list index` | `getByIndex(kvView, list, index)` | Get list element |
-| | `LPOP list` | `popLeft(kvView, list)` | Remove from list head |
-| Queue | `LPUSH queue item` | `enqueue(kvView, metaView, queue, item)` | Add to queue |
-| | `RPOP queue` | `dequeue(kvView, metaView, queue)` | Remove from queue |
-| Set | `SADD set member` | `sadd(kvView, set, member)` | Add unique member |
-| | `SISMEMBER set member` | `sismember(kvView, set, member)` | Check member exists |
-| | `SREM set member` | `srem(kvView, set, member)` | Remove member |
-| | `SCARD set` | `scard(kvView, set)` | Get member count |
-| | `SMEMBERS set` | `smembers(kvView, set)` | List all members |
-| | `SINTER set1 set2` | `sinter(kvView, set1, set2)` | Find common members |
-| Sorted Set | `ZADD zset score member` | `zadd(kvView, zset, member, score)` | Add scored member |
-| | `ZSCORE zset member` | `zscore(kvView, zset, member)` | Get member score |
-| | `ZINCRBY zset incr member` | `zincrby(kvView, zset, member, incr)` | Increment member score |
-| | `ZREM zset member` | `zrem(kvView, zset, member)` | Remove member |
-| Primitive Types | `SET counter 100` | `kvView.put(null, key, intValue)` | Store integer counter |
-| | `INCR counter` | `incrementCounter(kvView, "counter", 1)` | Increment counter value |
-| | `SET flag true` | `kvView.put(null, key, boolValue)` | Store boolean flag |
-| POJO Objects | `SET user:123 {json}` | `storeUser(kvView, "user:123", userObj)` | Store custom object |
-| | `GET user:123` | `getUser(kvView, "user:123")` | Retrieve custom object |
-| Colocation | `SET user:123 data` | `kvView.put(null, affinityKey, value)` | Store with affinity key |
-| Serialization | `SET msg {json}` | `storeJson(kvView, "msg", jsonData)` | Store JSON data |
-| | `SET obj {binary}` | `storeBinary(kvView, "obj", serialized)` | Store binary data |
-| Large Objects | `SET doc {content}` | `storeDocument(kvView, "doc", compressed)` | Store compressed document |
-| | `SET file {binary}` | `storeFile(kvView, "file", fileData)` | Store large file |
-| Record View | Multiple operations | `recordView.insert(null, record)` | Single record operation |
 
 ## Summary
 
