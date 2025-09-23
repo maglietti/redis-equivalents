@@ -2,22 +2,31 @@
 
 ## Overview
 
-Apache Ignite 3 provides Redis-like data structure operations through the Table API using KeyValueView, not a dedicated Redis-compatible interface. This project demonstrates 6 key Redis data structures implemented using Ignite 3's KeyValueView API with composite keys.
+Apache Ignite 3 provides Redis-like data structure operations through the Table API using KeyValueView and RecordView, not a dedicated Redis-compatible interface. This project demonstrates Redis data structures and key-value patterns implemented using Ignite 3's APIs.
 
-## Supported Data Structures
+## Supported Scenarios
 
-1. Key-Value Store - Redis GET/SET equivalents
-2. Hash - Redis HSET/HGET equivalents
-3. List - Redis LPUSH/RPOP equivalents
-4. Queue - Redis FIFO queue operations
-5. Set - Redis SADD/SISMEMBER equivalents
-6. Sorted Set - Redis ZADD/ZSCORE equivalents
+### Core Redis Data Structures
+1. **Key-Value Store** - Redis GET/SET equivalents
+2. **Hash** - Redis HSET/HGET equivalents
+3. **List** - Redis LPUSH/RPOP equivalents
+4. **Queue** - Redis FIFO queue operations
+5. **Set** - Redis SADD/SISMEMBER equivalents
+6. **Sorted Set** - Redis ZADD/ZSCORE equivalents
+
+### Advanced Key-Value Patterns
+7. **Primitive Types** - Integer, double, boolean key-value operations
+8. **POJO Objects** - Custom object serialization and storage
+9. **Data Colocation** - Composite keys for automatic data colocation
+10. **Serialization** - JSON and Java serialization patterns
+11. **Large Objects** - Document and file storage with compression
+12. **Record View** - Comparison with KeyValueView for data efficiency
 
 ## Key Differences
 
 - No dedicated Redis API: Ignite 3 uses table-based approach with KeyValueView
 - Structured data: Works with typed tuples/POJOs rather than byte arrays
-- Schema required: Must create table with defined columns first
+- Schema required: Table creation with defined columns needed
 - ACID transactions: All operations support transactional semantics
 - SQL integration: Same data accessible via SQL queries
 
@@ -188,6 +197,181 @@ sinter(kvView, "set1", "set2");
 ./gradlew runSet
 ```
 
+## 7. Primitive Types (IgnitePrimitiveTypesExample.java)
+
+Native type support for integers, doubles, and booleans without string conversion overhead.
+
+### Primitive Operations
+
+```java
+// Integer keys with string values (session data)
+Tuple sessionKey = Tuple.create().set("session_id", 12345);
+Tuple sessionData = Tuple.create().set("user_data", "user:alice|role:admin");
+sessionView.put(null, sessionKey, sessionData);
+
+// String keys with integer values (counters)
+Tuple counterKey = Tuple.create().set("counter_name", "page_views");
+Tuple counterValue = Tuple.create().set("count_value", 1000);
+counterView.put(null, counterKey, counterValue);
+
+// String keys with boolean values (feature flags)
+Tuple flagKey = Tuple.create().set("feature_name", "dark_mode");
+Tuple flagValue = Tuple.create().set("is_enabled", true);
+flagView.put(null, flagKey, flagValue);
+
+// String keys with double values (metrics)
+Tuple metricKey = Tuple.create().set("metric_name", "avg_response_time");
+Tuple metricValue = Tuple.create().set("metric_value", 245.7);
+metricsView.put(null, metricKey, metricValue);
+```
+
+### Running the Example
+```bash
+./gradlew runPrimitiveTypes
+```
+
+## 8. POJO Objects (IgnitePojoExample.java)
+
+Custom object storage with automatic Java serialization for complex domain models.
+
+### POJO Operations
+
+```java
+// Store User objects with string keys
+User alice = new User("alice", "alice@example.com", "Alice Smith", 28);
+storeUser(userView, "user:alice", alice);
+
+// Store Product objects with custom ProductKey
+ProductKey laptopKey = new ProductKey("electronics", "laptop", "SKU123");
+Product laptop = new Product("Gaming Laptop", "Gaming laptop with advanced graphics", 1299.99, 50);
+storeProduct(productView, laptopKey, laptop);
+
+// Store SessionData with composite SessionKey
+SessionKey sessionKey = new SessionKey("alice", "web", "192.168.1.100");
+SessionData session = new SessionData("alice", "admin", System.currentTimeMillis(), 3600000);
+storeSession(sessionView, sessionKey, session);
+```
+
+### Running the Example
+```bash
+./gradlew runPojo
+```
+
+## 9. Data Colocation (IgniteColocationExample.java)
+
+Composite key usage for automatic data colocation to reduce network hops and improve performance.
+
+### Colocation Operations
+
+```java
+// Colocate user profiles with their orders using user_id
+client.sql().execute(null,
+    "CREATE TABLE orders (" +
+    "order_id VARCHAR, user_id VARCHAR, order_amount DOUBLE, " +
+    "PRIMARY KEY (order_id, user_id))");
+
+// All user data stored on same node for efficient queries
+storeUser(userView, "user_001", "Alice Johnson", "alice@example.com", 0);
+storeOrder(orderView, "order_101", "user_001", "Gaming Laptop", 1299.99);
+storeOrder(orderView, "order_102", "user_001", "Wireless Mouse", 29.99);
+
+// Efficient retrieval of colocated data
+displayUserWithOrders(userView, orderView, "user_001");
+```
+
+### Running the Example
+```bash
+./gradlew runColocation
+```
+
+## 10. Serialization (IgniteSerializationExample.java)
+
+JSON and Java serialization patterns for cross-language compatibility and Kafka integration.
+
+### Serialization Operations
+
+```java
+// JSON serialization for API responses
+UserProfile profile = new UserProfile("alice", "Alice Johnson", "alice@example.com", 28, "admin");
+String profileJson = toJson(profile);
+storeJson(jsonView, "user:alice", profileJson);
+
+// Java serialization for complex objects
+ShoppingCart cart = new ShoppingCart("user_123");
+cart.addItem("laptop", 1299.99, 1);
+cart.addItem("mouse", 29.99, 2);
+storeBinary(binaryView, "cart:user_123", cart);
+
+// Kafka message processing with pre-serialized data
+processKafkaMessage(messageView, "user-events", "user_001",
+                   createUserEvent("user_001", "LOGIN", System.currentTimeMillis()));
+```
+
+### Running the Example
+```bash
+./gradlew runSerialization
+```
+
+## 11. Large Objects (IgniteLargeObjectsExample.java)
+
+Document and file storage with compression for large content management. Demo uses smaller sizes due to default VARBINARY 64KB limit.
+
+### Large Object Operations
+
+```java
+// Store large documents with compression (demo sized for 64KB VARBINARY limit)
+String largeArticle = generateLargeArticle(20000); // ~20KB article
+storeDocument(docView, "article:tech_trends_2024",
+             "Tech Trends 2024|author:John Doe", largeArticle);
+
+// Store binary files with metadata
+byte[] imageData = generateSyntheticImageData(30 * 1024); // 30KB image
+storeFile(fileView, "img_001", "profile_photo.jpg", "image/jpeg", imageData);
+
+// Handle pre-compressed data efficiently
+String xmlReport = generateXmlReport(20000);
+storeCompressedData(compressedView, "report:monthly_sales", "xml", xmlReport, "gzip");
+
+// Stream processing for large datasets
+processCompressedDataStream(xmlData, "Processing XML report");
+```
+
+### Running the Example
+```bash
+./gradlew runLargeObjects
+```
+
+## 12. Record View (IgniteRecordViewExample.java)
+
+Record View API comparison with KeyValueView to eliminate data duplication.
+
+### Record View Operations
+
+```java
+// Key-Value approach (with data duplication)
+Tuple key = Tuple.create().set("user_id", "alice");
+Tuple value = Tuple.create()
+        .set("user_id_dup", "alice")  // Duplicated field
+        .set("name", "Alice Johnson")
+        .set("email", "alice@example.com");
+kvView.put(null, key, value);
+
+// Record approach (no data duplication)
+Tuple record = Tuple.create()
+        .set("user_id", "alice")  // No duplication
+        .set("name", "Alice Johnson")
+        .set("email", "alice@example.com");
+recordView.insert(null, record);
+
+// Complete record retrieval in single operation
+Tuple user = recordView.get(null, Tuple.create().set("user_id", "alice"));
+```
+
+### Running the Example
+```bash
+./gradlew runRecordView
+```
+
 ## Key Differences from Redis
 
 | Aspect             | Redis                          | Apache Ignite 3                   |
@@ -197,7 +381,7 @@ sinter(kvView, "set1", "set2");
 | Transactions   | Limited transaction support    | Full ACID transactions            |
 | Type Safety    | Binary data                    | Strong typing for keys and values |
 | Query Language | Redis commands only            | SQL integration available         |
-| Distribution   | Single-node or cluster         | Built for distributed clusters    |
+| Distribution   | Single-node or cluster         | Designed for distributed clusters |
 | Consistency    | Eventual consistency options   | Strong consistency guarantees     |
 
 ## Client APIs
@@ -240,8 +424,8 @@ Each Redis data structure maps to a specific Ignite table schema using composite
 
 ## Redis Command Mapping
 
-| Data Structure | Redis Command | Ignite 3 Equivalent | Method |
-|----------------|---------------|---------------------|---------|
+| Pattern | Redis Command | Ignite 3 Equivalent | Method |
+|---------|---------------|---------------------|--------|
 | Key-Value | `GET key` | `kvView.get(null, key)` | Retrieve value by key |
 | | `SET key value` | `kvView.put(null, key, value)` | Store key-value pair |
 | | `EXISTS key` | `kvView.contains(null, key)` | Check if key exists |
@@ -266,10 +450,21 @@ Each Redis data structure maps to a specific Ignite table schema using composite
 | | `ZSCORE zset member` | `zscore(kvView, zset, member)` | Get member score |
 | | `ZINCRBY zset incr member` | `zincrby(kvView, zset, member, incr)` | Increment member score |
 | | `ZREM zset member` | `zrem(kvView, zset, member)` | Remove member |
+| Primitive Types | `SET counter 100` | `kvView.put(null, key, intValue)` | Store integer counter |
+| | `INCR counter` | `incrementCounter(kvView, "counter", 1)` | Increment counter value |
+| | `SET flag true` | `kvView.put(null, key, boolValue)` | Store boolean flag |
+| POJO Objects | `SET user:123 {json}` | `storeUser(kvView, "user:123", userObj)` | Store custom object |
+| | `GET user:123` | `getUser(kvView, "user:123")` | Retrieve custom object |
+| Colocation | `SET user:123 data` | `kvView.put(null, affinityKey, value)` | Store with affinity key |
+| Serialization | `SET msg {json}` | `storeJson(kvView, "msg", jsonData)` | Store JSON data |
+| | `SET obj {binary}` | `storeBinary(kvView, "obj", serialized)` | Store binary data |
+| Large Objects | `SET doc {content}` | `storeDocument(kvView, "doc", compressed)` | Store compressed document |
+| | `SET file {binary}` | `storeFile(kvView, "file", fileData)` | Store large file |
+| Record View | Multiple operations | `recordView.insert(null, record)` | Single record operation |
 
 ## Summary
 
-While Apache Ignite 3 doesn't provide a direct Redis-compatible API, the `KeyValueView` interface offers equivalent functionality with additional benefits like ACID transactions, SQL integration, and strong consistency guarantees. The main difference is that you work with structured tables rather than key-value pairs, which provides more flexibility and type safety.
+Apache Ignite 3 does not provide a direct Redis-compatible API. The `KeyValueView` interface offers equivalent functionality with additional benefits like ACID transactions, SQL integration, and strong consistency guarantees. The main difference is working with structured tables rather than key-value pairs, which provides more flexibility and type safety.
 
 ## References
 
@@ -285,6 +480,8 @@ While Apache Ignite 3 doesn't provide a direct Redis-compatible API, the `KeyVal
 ```
 
 ### Run Individual Examples
+
+#### Core Redis Data Structures
 ```bash
 # Key-Value Store
 ./gradlew runKeyValue
@@ -305,7 +502,28 @@ While Apache Ignite 3 doesn't provide a direct Redis-compatible API, the `KeyVal
 ./gradlew runSortedSet
 ```
 
+#### Advanced Key-Value Patterns
+```bash
+# Primitive type operations
+./gradlew runPrimitiveTypes
+
+# POJO object operations
+./gradlew runPojo
+
+# Data colocation patterns
+./gradlew runColocation
+
+# Serialization examples
+./gradlew runSerialization
+
+# Large object storage
+./gradlew runLargeObjects
+
+# Record View comparison
+./gradlew runRecordView
+```
+
 ### Run All Examples (default)
 ```bash
-./gradlew run  # Runs all 6 examples sequentially
+./gradlew run  # Runs all 12 examples sequentially
 ```
