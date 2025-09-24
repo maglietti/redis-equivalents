@@ -65,3 +65,45 @@ task runSet(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'IgniteSetExample'
 }
+
+task runPrimitiveTypes(type: JavaExec) {
+    group = 'application'
+    description = 'Run primitive type key-value operations'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgnitePrimitiveTypesExample'
+}
+
+task runPojo(type: JavaExec) {
+    group = 'application'
+    description = 'Run custom POJO key-value operations'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgnitePojoExample'
+}
+
+task runColocation(type: JavaExec) {
+    group = 'application'
+    description = 'Run data colocation with affinity keys'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteColocationExample'
+}
+
+task runSerialization(type: JavaExec) {
+    group = 'application'
+    description = 'Run serialized key-value operations'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteSerializationExample'
+}
+
+task runLargeObjects(type: JavaExec) {
+    group = 'application'
+    description = 'Run large object storage operations'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteLargeObjectsExample'
+}
+
+task runRecordView(type: JavaExec) {
+    group = 'application'
+    description = 'Run Record View vs Key-Value comparison'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'IgniteRecordViewExample'
+}
