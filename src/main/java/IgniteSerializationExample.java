@@ -1,21 +1,21 @@
 import org.apache.ignite.client.IgniteClient;
 import org.apache.ignite.table.KeyValueView;
 import org.apache.ignite.table.Tuple;
+import org.apache.ignite.table.mapper.Mapper;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Demonstrates serialized key-value operations using Apache Ignite 3.
+ * Demonstrates serialization patterns using Apache Ignite 3.
  *
  * Redis treats all data as byte arrays requiring external serialization,
- * while Ignite supports both automatic POJO serialization and manual
- * control over serialization formats like JSON and Java serialization.
+ * while Ignite uses the Mapper system for automatic POJO serialization.
+ * This example shows when to use Mappers (normal POJO storage) versus
+ * when manual JSON serialization is appropriate (cross-language compatibility).
  *
- * This pattern is essential for Kafka integration where messages arrive
- * pre-serialized and applications need direct access to serialized data.
+ * For most use cases, including Kafka integration with POJOs, use Mappers
+ * to let Ignite handle serialization automatically.
  */
 public class IgniteSerializationExample {
     public static void main(String[] args) throws Exception {
@@ -24,7 +24,7 @@ public class IgniteSerializationExample {
                 .build()) {
 
             demonstrateJsonSerialization(client);
-            demonstrateJavaSerialization(client);
+            demonstratePojoWithMappers(client);
             demonstrateKafkaMessagePattern(client);
         }
     }
@@ -75,29 +75,66 @@ public class IgniteSerializationExample {
     }
 
     /**
-     * Stores objects using Java's built-in serialization.
-     * Pattern: Binary serialization for Java-specific applications.
+     * Stores POJOs using Ignite's Mapper system for automatic serialization.
+     * Pattern: Type-safe POJO storage for Java applications.
+     * This is the recommended approach for storing complex objects.
      */
-    private static void demonstrateJavaSerialization(IgniteClient client) throws Exception {
-        System.out.println("=== Java Serialization Example ===");
+    private static void demonstratePojoWithMappers(IgniteClient client) throws Exception {
+        System.out.println("=== POJO Storage with Mappers ===");
 
+        // Drop and recreate tables for clean schema
+        client.sql().execute(null, "DROP TABLE IF EXISTS shopping_carts");
         client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS binary_cache (" +
-                        "key VARCHAR PRIMARY KEY," +
-                        "binary_data VARBINARY)"
+                "CREATE TABLE shopping_carts (" +
+                        "cart_id VARCHAR PRIMARY KEY," +
+                        "user_id VARCHAR," +
+                        "total_amount DOUBLE," +
+                        "item_count INT)"
         );
 
-        KeyValueView<Tuple, Tuple> binaryView = client.tables()
-                .table("binary_cache")
-                .keyValueView();
+        client.sql().execute(null, "DROP TABLE IF EXISTS app_configs");
+        client.sql().execute(null,
+                "CREATE TABLE app_configs (" +
+                        "config_key VARCHAR PRIMARY KEY," +
+                        "max_connections INT," +
+                        "timeout_ms BIGINT," +
+                        "retry_attempts INT," +
+                        "feature_flags VARCHAR)"
+        );
 
-        // Store complex objects using Java serialization
+        // Mapper for ShoppingCart with explicit field mapping
+        // Note: cart_id is the key, so it's NOT in the value mapper
+        Mapper<ShoppingCart> cartMapper = Mapper.builder(ShoppingCart.class)
+                .automap()
+                .map("userId", "user_id")
+                .map("totalAmount", "total_amount")
+                .map("itemCount", "item_count")
+                .build();
+
+        // Mapper for AppConfig with explicit field mapping
+        // Note: config_key is the key, so it's NOT in the value mapper
+        Mapper<AppConfig> configMapper = Mapper.builder(AppConfig.class)
+                .automap()
+                .map("maxConnections", "max_connections")
+                .map("timeoutMs", "timeout_ms")
+                .map("retryAttempts", "retry_attempts")
+                .map("featureFlags", "feature_flags")
+                .build();
+
+        KeyValueView<String, ShoppingCart> cartView = client.tables()
+                .table("shopping_carts")
+                .keyValueView(Mapper.of(String.class), cartMapper);
+
+        KeyValueView<String, AppConfig> configView = client.tables()
+                .table("app_configs")
+                .keyValueView(Mapper.of(String.class), configMapper);
+
+        // Store complex objects directly - Mapper handles serialization
         ShoppingCart cart = new ShoppingCart("user_123");
         cart.addItem("laptop", 1299.99, 1);
         cart.addItem("mouse", 29.99, 2);
         cart.addItem("keyboard", 79.99, 1);
-
-        storeBinary(binaryView, "cart:user_123", cart);
+        cartView.put(null, "cart:user_123", cart);
 
         // Store configuration object
         AppConfig config = new AppConfig();
@@ -106,64 +143,87 @@ public class IgniteSerializationExample {
         config.setRetryAttempts(3);
         config.enableFeature("dark_mode");
         config.enableFeature("notifications");
+        configView.put(null, "config:app", config);
 
-        storeBinary(binaryView, "config:app", config);
-
-        // Retrieve and deserialize binary data
-        ShoppingCart retrievedCart = (ShoppingCart) getBinary(binaryView, "cart:user_123");
+        // Retrieve objects - automatic deserialization
+        ShoppingCart retrievedCart = cartView.get(null, "cart:user_123");
         System.out.println("Retrieved shopping cart: " + retrievedCart);
 
-        AppConfig retrievedConfig = (AppConfig) getBinary(binaryView, "config:app");
+        AppConfig retrievedConfig = configView.get(null, "config:app");
         System.out.println("Retrieved app config: " + retrievedConfig);
 
         // Modify and store updated objects
         retrievedCart.addItem("monitor", 299.99, 1);
-        storeBinary(binaryView, "cart:user_123", retrievedCart);
+        cartView.put(null, "cart:user_123", retrievedCart);
 
         retrievedConfig.setTimeoutMs(10000);
-        storeBinary(binaryView, "config:app", retrievedConfig);
+        configView.put(null, "config:app", retrievedConfig);
+
+        System.out.println("Updated shopping cart: " + cartView.get(null, "cart:user_123"));
+        System.out.println("Updated app config: " + configView.get(null, "config:app"));
 
         System.out.println();
     }
 
     /**
-     * Simulates Kafka message processing with pre-serialized data.
-     * Pattern: Process serialized messages without unnecessary deserialization.
+     * Simulates Kafka message processing using Mappers.
+     * Pattern: Store deserialized Kafka messages as POJOs using Mappers.
+     * When receiving messages from Kafka, deserialize once and store as POJOs.
      */
     private static void demonstrateKafkaMessagePattern(IgniteClient client) throws Exception {
         System.out.println("=== Kafka Message Processing Pattern ===");
 
+        // Drop and recreate table for clean schema
+        client.sql().execute(null, "DROP TABLE IF EXISTS kafka_messages");
         client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS kafka_messages (" +
+                "CREATE TABLE kafka_messages (" +
                         "topic VARCHAR," +
                         "partition_key VARCHAR," +
-                        "message_data VARBINARY," +
+                        "user_id VARCHAR," +
+                        "order_id VARCHAR," +
+                        "event_type VARCHAR," +
+                        "event_timestamp BIGINT," +
                         "metadata VARCHAR," +
                         "PRIMARY KEY (topic, partition_key))"
         );
 
-        KeyValueView<Tuple, Tuple> messageView = client.tables()
+        // Mapper for KafkaMessageKey with explicit field mapping
+        Mapper<KafkaMessageKey> keyMapper = Mapper.builder(KafkaMessageKey.class)
+                .automap()
+                .map("partitionKey", "partition_key")
+                .build();
+
+        // Mapper for KafkaMessage with explicit field mapping
+        Mapper<KafkaMessage> messageMapper = Mapper.builder(KafkaMessage.class)
+                .automap()
+                .map("userId", "user_id")
+                .map("orderId", "order_id")
+                .map("eventType", "event_type")
+                .map("eventTimestamp", "event_timestamp")
+                .build();
+
+        KeyValueView<KafkaMessageKey, KafkaMessage> messageView = client.tables()
                 .table("kafka_messages")
-                .keyValueView();
+                .keyValueView(keyMapper, messageMapper);
 
-        // Simulate processing Kafka messages
-        processKafkaMessage(messageView, "user-events", "user_001",
-                           createUserEvent("user_001", "LOGIN", System.currentTimeMillis()));
+        // Simulate processing Kafka messages - store POJOs directly
+        KafkaMessage userEvent1 = createUserEvent("user_001", "LOGIN", System.currentTimeMillis());
+        messageView.put(null, new KafkaMessageKey("user-events", "user_001"), userEvent1);
 
-        processKafkaMessage(messageView, "user-events", "user_002",
-                           createUserEvent("user_002", "PURCHASE", System.currentTimeMillis()));
+        KafkaMessage userEvent2 = createUserEvent("user_002", "PURCHASE", System.currentTimeMillis());
+        messageView.put(null, new KafkaMessageKey("user-events", "user_002"), userEvent2);
 
-        processKafkaMessage(messageView, "orders", "order_501",
-                           createOrderEvent("order_501", "user_001", 1299.99, "CREATED"));
+        KafkaMessage orderEvent = createOrderEvent("order_501", "user_001", 1299.99, "CREATED");
+        messageView.put(null, new KafkaMessageKey("orders", "order_501"), orderEvent);
 
-        // Retrieve messages for processing
-        KafkaMessage userMessage = getKafkaMessage(messageView, "user-events", "user_001");
-        KafkaMessage orderMessage = getKafkaMessage(messageView, "orders", "order_501");
+        // Retrieve messages for processing - automatic deserialization
+        KafkaMessage userMessage = messageView.get(null, new KafkaMessageKey("user-events", "user_001"));
+        KafkaMessage orderMessage = messageView.get(null, new KafkaMessageKey("orders", "order_501"));
 
         System.out.println("User event message: " + userMessage);
         System.out.println("Order event message: " + orderMessage);
 
-        // Process message without full deserialization
+        // Process messages
         processUserEventMessage(userMessage);
         processOrderEventMessage(orderMessage);
 
@@ -183,65 +243,6 @@ public class IgniteSerializationExample {
         return value != null ? value.stringValue("json_data") : null;
     }
 
-    // Binary serialization helpers
-    private static void storeBinary(KeyValueView<Tuple, Tuple> view, String key, Serializable object) {
-        Tuple keyTuple = Tuple.create().set("key", key);
-        Tuple valueTuple = Tuple.create().set("binary_data", serializeObject(object));
-        view.put(null, keyTuple, valueTuple);
-    }
-
-    private static Object getBinary(KeyValueView<Tuple, Tuple> view, String key) {
-        Tuple keyTuple = Tuple.create().set("key", key);
-        Tuple value = view.get(null, keyTuple);
-        if (value != null) {
-            byte[] data = value.value("binary_data");
-            return deserializeObject(data);
-        }
-        return null;
-    }
-
-    // Kafka message helpers
-    private static void processKafkaMessage(KeyValueView<Tuple, Tuple> view, String topic, String partitionKey, KafkaMessage message) {
-        Tuple key = Tuple.create()
-                .set("topic", topic)
-                .set("partition_key", partitionKey);
-        Tuple value = Tuple.create()
-                .set("message_data", serializeObject(message))
-                .set("metadata", message.getMetadata());
-        view.put(null, key, value);
-    }
-
-    private static KafkaMessage getKafkaMessage(KeyValueView<Tuple, Tuple> view, String topic, String partitionKey) {
-        Tuple key = Tuple.create()
-                .set("topic", topic)
-                .set("partition_key", partitionKey);
-        Tuple value = view.get(null, key);
-        if (value != null) {
-            byte[] data = value.value("message_data");
-            return (KafkaMessage) deserializeObject(data);
-        }
-        return null;
-    }
-
-    // Serialization utilities
-    private static byte[] serializeObject(Serializable obj) {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
-             ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-            oos.writeObject(obj);
-            return baos.toByteArray();
-        } catch (Exception e) {
-            throw new RuntimeException("Serialization failed", e);
-        }
-    }
-
-    private static Object deserializeObject(byte[] data) {
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(data);
-             ObjectInputStream ois = new ObjectInputStream(bais)) {
-            return ois.readObject();
-        } catch (Exception e) {
-            throw new RuntimeException("Deserialization failed", e);
-        }
-    }
 
     // JSON serialization for demonstration purposes
     private static String toJson(Object obj) {
@@ -308,6 +309,22 @@ public class IgniteSerializationExample {
         return new KafkaMessage(userId, orderId, eventType, System.currentTimeMillis(), "order-event:" + orderId);
     }
 
+    // Composite key for Kafka messages
+    static class KafkaMessageKey {
+        private String topic;
+        private String partitionKey;
+
+        public KafkaMessageKey() {} // Required for Ignite Mapper
+
+        public KafkaMessageKey(String topic, String partitionKey) {
+            this.topic = topic;
+            this.partitionKey = partitionKey;
+        }
+
+        public String getTopic() { return topic; }
+        public String getPartitionKey() { return partitionKey; }
+    }
+
     // Domain objects for serialization examples
     static class UserProfile {
         String username;
@@ -351,93 +368,96 @@ public class IgniteSerializationExample {
         }
     }
 
-    static class ShoppingCart implements Serializable {
+    static class ShoppingCart {
         private String userId;
-        private Map<String, CartItem> items;
         private double totalAmount;
+        private int itemCount;
+
+        public ShoppingCart() {} // Required for Ignite Mapper
 
         public ShoppingCart(String userId) {
             this.userId = userId;
-            this.items = new HashMap<>();
             this.totalAmount = 0.0;
+            this.itemCount = 0;
         }
 
         public void addItem(String productName, double price, int quantity) {
-            items.put(productName, new CartItem(productName, price, quantity));
-            calculateTotal();
+            this.totalAmount += price * quantity;
+            this.itemCount += quantity;
         }
 
-        private void calculateTotal() {
-            totalAmount = items.values().stream()
-                    .mapToDouble(item -> item.price * item.quantity)
-                    .sum();
-        }
+        public String getUserId() { return userId; }
+        public double getTotalAmount() { return totalAmount; }
+        public int getItemCount() { return itemCount; }
 
         @Override
         public String toString() {
-            return "ShoppingCart{userId='" + userId + "', items=" + items.size() +
-                   ", totalAmount=" + totalAmount + "}";
-        }
-
-        static class CartItem implements Serializable {
-            String productName;
-            double price;
-            int quantity;
-
-            public CartItem(String productName, double price, int quantity) {
-                this.productName = productName;
-                this.price = price;
-                this.quantity = quantity;
-            }
+            return "ShoppingCart{userId='" + userId +
+                   "', itemCount=" + itemCount + ", totalAmount=" + totalAmount + "}";
         }
     }
 
-    static class AppConfig implements Serializable {
+    static class AppConfig {
         private int maxConnections;
         private long timeoutMs;
         private int retryAttempts;
-        private Map<String, Boolean> features;
+        private String featureFlags; // Stored as comma-separated string for simplicity
 
         public AppConfig() {
-            this.features = new HashMap<>();
+            this.featureFlags = "";
         }
 
         public void setMaxConnections(int maxConnections) { this.maxConnections = maxConnections; }
         public void setTimeoutMs(long timeoutMs) { this.timeoutMs = timeoutMs; }
         public void setRetryAttempts(int retryAttempts) { this.retryAttempts = retryAttempts; }
-        public void enableFeature(String feature) { features.put(feature, true); }
+        public void enableFeature(String feature) {
+            if (featureFlags.isEmpty()) {
+                featureFlags = feature;
+            } else {
+                featureFlags += "," + feature;
+            }
+        }
+
+        public int getMaxConnections() { return maxConnections; }
+        public long getTimeoutMs() { return timeoutMs; }
+        public int getRetryAttempts() { return retryAttempts; }
+        public String getFeatureFlags() { return featureFlags; }
 
         @Override
         public String toString() {
-            return "AppConfig{maxConnections=" + maxConnections + ", timeoutMs=" + timeoutMs +
-                   ", retryAttempts=" + retryAttempts + ", features=" + features + "}";
+            return "AppConfig{maxConnections=" + maxConnections +
+                   ", timeoutMs=" + timeoutMs + ", retryAttempts=" + retryAttempts +
+                   ", featureFlags='" + featureFlags + "'}";
         }
     }
 
-    static class KafkaMessage implements Serializable {
+    static class KafkaMessage {
         private String userId;
         private String orderId;
         private String eventType;
-        private long timestamp;
+        private long eventTimestamp;
         private String metadata;
 
-        public KafkaMessage(String userId, String orderId, String eventType, long timestamp, String metadata) {
+        public KafkaMessage() {} // Required for Ignite Mapper
+
+        public KafkaMessage(String userId, String orderId, String eventType, long eventTimestamp, String metadata) {
             this.userId = userId;
             this.orderId = orderId;
             this.eventType = eventType;
-            this.timestamp = timestamp;
+            this.eventTimestamp = eventTimestamp;
             this.metadata = metadata;
         }
 
         public String getUserId() { return userId; }
         public String getOrderId() { return orderId; }
         public String getEventType() { return eventType; }
+        public long getEventTimestamp() { return eventTimestamp; }
         public String getMetadata() { return metadata; }
 
         @Override
         public String toString() {
             return "KafkaMessage{userId='" + userId + "', orderId='" + orderId +
-                   "', eventType='" + eventType + "', timestamp=" + timestamp + "}";
+                   "', eventType='" + eventType + "', eventTimestamp=" + eventTimestamp + "}";
         }
     }
 }
