@@ -16,9 +16,9 @@ Apache Ignite 3 provides Redis-like data structure operations through the Table 
 
 ### Advanced Key-Value Patterns
 7. **Primitive Types** - Integer, double, boolean key-value operations
-8. **POJO Objects** - Custom object serialization and storage
+8. **POJO Objects** - Mapper-based POJO storage with automatic serialization
 9. **Data Colocation** - Composite keys for automatic data colocation
-10. **Serialization** - JSON and Java serialization patterns
+10. **Serialization** - JSON serialization and Mapper-based POJO storage patterns
 11. **Large Objects** - Document and file storage with compression
 12. **Record View** - API design comparison with KeyValueView
 
@@ -109,14 +109,14 @@ Each Redis data structure maps to a specific Ignite table schema using composite
 | Primitive Types | `SET counter 100` | `kvView.put(null, key, intValue)` | Store integer counter |
 | | `INCR counter` | `incrementCounter(kvView, "counter", 1)` | Increment counter value |
 | | `SET flag true` | `kvView.put(null, key, boolValue)` | Store boolean flag |
-| POJO Objects | `SET user:123 {json}` | `storeUser(kvView, "user:123", userObj)` | Store custom object |
-| | `GET user:123` | `getUser(kvView, "user:123")` | Retrieve custom object |
+| POJO Objects | `SET user:123 {json}` | `userView.put(null, "user:123", userObj)` | Store POJO with Mapper |
+| | `GET user:123` | `userView.get(null, "user:123")` | Retrieve POJO with Mapper |
 | Colocation | `SET user:123 data` | `kvView.put(null, affinityKey, value)` | Store with affinity key |
-| Serialization | `SET msg {json}` | `storeJson(kvView, "msg", jsonData)` | Store JSON data |
-| | `SET obj {binary}` | `storeBinary(kvView, "obj", serialized)` | Store binary data |
-| Large Objects | `SET doc {content}` | `storeDocument(kvView, "doc", compressed)` | Store compressed document |
-| | `SET file {binary}` | `storeFile(kvView, "file", fileData)` | Store large file |
-| Record View | Multiple operations | `recordView.insert(null, record)` | Single record operation |
+| Serialization | `SET msg {json}` | `kvView.put(null, keyTuple, jsonTuple)` | Store JSON string |
+| | `SET obj {pojo}` | `pojoView.put(null, key, pojoObj)` | Store POJO with Mapper |
+| Large Objects | `SET doc {content}` | `kvView.put(null, keyTuple, compressedTuple)` | Store compressed data |
+| | `SET file {binary}` | `kvView.put(null, keyTuple, binaryTuple)` | Store binary file data |
+| Record View | Multiple operations | `recordView.insert(null, record)` | Insert complete record |
 
 ---
 
@@ -322,24 +322,50 @@ metricsView.put(null, metricKey, metricValue);
 
 ## 8. POJO Objects (IgnitePojoExample.java)
 
-Custom object storage with automatic Java serialization for complex domain models.
+Custom object storage using Ignite's Mapper system for automatic POJO serialization.
 
 ### POJO Operations
 
 ```java
-// Store User objects with string keys
-User alice = new User("alice", "alice@example.com", "Alice Smith", 28);
-storeUser(userView, "user:alice", alice);
+// Create table with snake_case columns
+client.sql().execute(null,
+    "CREATE TABLE user_profiles (" +
+    "user_id VARCHAR PRIMARY KEY," +
+    "username VARCHAR," +
+    "email VARCHAR," +
+    "full_name VARCHAR," +
+    "age INT)");
 
-// Store Product objects with custom ProductKey
+// Use Mapper.builder() for explicit field-to-column mapping
+Mapper<User> userMapper = Mapper.builder(User.class)
+    .automap()  // Auto-maps: username, email, age
+    .map("fullName", "full_name")  // Explicit: fullName -> full_name
+    .build();
+
+KeyValueView<String, User> userView = client.tables()
+    .table("user_profiles")
+    .keyValueView(Mapper.of(String.class), userMapper);
+
+// Store users directly - Mapper handles serialization
+User alice = new User("alice", "alice@example.com", "Alice Smith", 28);
+userView.put(null, "user:alice", alice);
+
+// Retrieve users - automatic deserialization
+User retrievedAlice = userView.get(null, "user:alice");
+
+// Store Product objects with composite ProductKey
+Mapper<Product> productMapper = Mapper.builder(Product.class)
+    .automap()
+    .map("inventoryCount", "inventory_count")
+    .build();
+
+KeyValueView<ProductKey, Product> productView = client.tables()
+    .table("product_catalog")
+    .keyValueView(Mapper.of(ProductKey.class), productMapper);
+
 ProductKey laptopKey = new ProductKey("electronics", "laptop", "SKU123");
 Product laptop = new Product("Gaming Laptop", "Gaming laptop with advanced graphics", 1299.99, 50);
-storeProduct(productView, laptopKey, laptop);
-
-// Store SessionData with composite SessionKey
-SessionKey sessionKey = new SessionKey("alice", "web", "192.168.1.100");
-SessionData session = new SessionData("alice", "admin", System.currentTimeMillis(), 3600000);
-storeSession(sessionView, sessionKey, session);
+productView.put(null, laptopKey, laptop);
 ```
 
 ### Running the Example
@@ -376,25 +402,51 @@ displayUserWithOrders(userView, orderView, "user_001");
 
 ## 10. Serialization (IgniteSerializationExample.java)
 
-JSON and Java serialization patterns for cross-language compatibility and Kafka integration.
+Demonstrates when to use JSON serialization versus Mapper-based POJO storage.
 
 ### Serialization Operations
 
 ```java
-// JSON serialization for API responses
+// JSON serialization for cross-language compatibility
 UserProfile profile = new UserProfile("alice", "Alice Johnson", "alice@example.com", 28, "admin");
 String profileJson = toJson(profile);
-storeJson(jsonView, "user:alice", profileJson);
 
-// Java serialization for complex objects
+KeyValueView<Tuple, Tuple> jsonView = client.tables()
+    .table("json_cache")
+    .keyValueView();
+
+Tuple keyTuple = Tuple.create().set("key", "user:alice");
+Tuple valueTuple = Tuple.create().set("json_data", profileJson);
+jsonView.put(null, keyTuple, valueTuple);
+
+// POJO storage with Mappers for type-safe Java applications
+Mapper<ShoppingCart> cartMapper = Mapper.builder(ShoppingCart.class)
+    .automap()
+    .map("userId", "user_id")
+    .map("totalAmount", "total_amount")
+    .map("itemCount", "item_count")
+    .build();
+
+KeyValueView<String, ShoppingCart> cartView = client.tables()
+    .table("shopping_carts")
+    .keyValueView(Mapper.of(String.class), cartMapper);
+
 ShoppingCart cart = new ShoppingCart("user_123");
 cart.addItem("laptop", 1299.99, 1);
 cart.addItem("mouse", 29.99, 2);
-storeBinary(binaryView, "cart:user_123", cart);
+cartView.put(null, "cart:user_123", cart);
 
-// Kafka message processing with pre-serialized data
-processKafkaMessage(messageView, "user-events", "user_001",
-                   createUserEvent("user_001", "LOGIN", System.currentTimeMillis()));
+// Kafka message processing using Mappers
+Mapper<KafkaMessage> messageMapper = Mapper.builder(KafkaMessage.class)
+    .automap()
+    .map("userId", "user_id")
+    .map("orderId", "order_id")
+    .map("eventType", "event_type")
+    .map("eventTimestamp", "event_timestamp")
+    .build();
+
+KafkaMessage userEvent = createUserEvent("user_001", "LOGIN", System.currentTimeMillis());
+messageView.put(null, new KafkaMessageKey("user-events", "user_001"), userEvent);
 ```
 
 ### Running the Example
