@@ -6,12 +6,11 @@ import org.apache.ignite.table.Tuple;
 /**
  * Demonstrates Record View API compared to Key-Value View API in Apache Ignite 3.
  *
- * Redis requires separate keys for related data causing duplication,
- * while Ignite's Record View eliminates this by storing complete records
- * with primary keys as part of the record structure.
- *
- * This pattern reduces memory usage and simplifies data access patterns
- * for applications with structured domain objects.
+ * Both APIs use the same underlying table structure. The difference is in API design:
+ * KeyValueView separates key and value in method calls, while RecordView treats
+ * the entire row as a single record. RecordView simplifies operations when the
+ * primary key is part of the domain object, while KeyValueView is useful when
+ * using surrogate keys or when key and value represent distinct domain concepts.
  */
 public class IgniteRecordViewExample {
     public static void main(String[] args) throws Exception {
@@ -27,30 +26,31 @@ public class IgniteRecordViewExample {
 
     /**
      * Compares Key-Value vs Record View for user profile storage.
-     * Shows data duplication elimination and simplified access patterns.
+     * Both use the same table schema. KeyValueView separates key from value in API calls,
+     * while RecordView uses a single record containing all fields.
      */
     private static void demonstrateUserProfileComparison(IgniteClient client) throws Exception {
         System.out.println("=== User Profile: Key-Value vs Record View Comparison ===");
 
-        // Create tables for both approaches
-        createUserProfileTables(client);
+        // Create table (same schema for both views)
+        createUserProfileTable(client);
 
-        // Get views for both approaches
+        // Get both views for the same table
         KeyValueView<Tuple, Tuple> kvView = client.tables()
-                .table("user_profiles_kv")
+                .table("user_profiles")
                 .keyValueView();
 
         RecordView<Tuple> recordView = client.tables()
-                .table("user_profiles_record")
+                .table("user_profiles")
                 .recordView();
 
-        // Store user data using Key-Value approach (with duplication)
-        System.out.println("--- Key-Value Approach (with data duplication) ---");
+        // Store user data using Key-Value approach (separate key and value)
+        System.out.println("--- Key-Value Approach (separate key and value parameters) ---");
         storeUserWithKeyValue(kvView, "alice", "Alice Johnson", "alice@example.com", 28, "Engineering");
         storeUserWithKeyValue(kvView, "bob", "Bob Smith", "bob@example.com", 34, "Marketing");
 
-        // Store user data using Record View approach (no duplication)
-        System.out.println("--- Record View Approach (no data duplication) ---");
+        // Store user data using Record View approach (single record)
+        System.out.println("--- Record View Approach (single record parameter) ---");
         storeUserWithRecord(recordView, "alice", "Alice Johnson", "alice@example.com", 28, "Engineering");
         storeUserWithRecord(recordView, "bob", "Bob Smith", "bob@example.com", 34, "Marketing");
 
@@ -72,20 +72,21 @@ public class IgniteRecordViewExample {
 
     /**
      * Compares Key-Value vs Record View for product catalog management.
-     * Shows query pattern differences and data organization benefits.
+     * Both use the same table schema. Demonstrates API differences in insert and update operations.
      */
     private static void demonstrateProductCatalogComparison(IgniteClient client) throws Exception {
         System.out.println("=== Product Catalog: Key-Value vs Record View Comparison ===");
 
-        // Create tables for both approaches
-        createProductCatalogTables(client);
+        // Create table (same schema for both views)
+        createProductCatalogTable(client);
 
+        // Get both views for the same table
         KeyValueView<Tuple, Tuple> kvView = client.tables()
-                .table("products_kv")
+                .table("products")
                 .keyValueView();
 
         RecordView<Tuple> recordView = client.tables()
-                .table("products_record")
+                .table("products")
                 .recordView();
 
         // Store product data
@@ -110,21 +111,22 @@ public class IgniteRecordViewExample {
     }
 
     /**
-     * Demonstrates performance and memory usage differences.
-     * Shows how Record View reduces overhead and simplifies operations.
+     * Demonstrates API ergonomics differences between KeyValueView and RecordView.
+     * Both use the same table schema. RecordView simplifies code when working with complete records.
      */
     private static void demonstratePerformanceComparison(IgniteClient client) throws Exception {
-        System.out.println("=== Performance and Memory Usage Comparison ===");
+        System.out.println("=== API Ergonomics Comparison ===");
 
-        // Create tables for performance testing
-        createPerformanceTables(client);
+        // Create table (same schema for both views)
+        createPerformanceTable(client);
 
+        // Get both views for the same table
         KeyValueView<Tuple, Tuple> kvView = client.tables()
-                .table("perf_test_kv")
+                .table("perf_test")
                 .keyValueView();
 
         RecordView<Tuple> recordView = client.tables()
-                .table("perf_test_record")
+                .table("perf_test")
                 .recordView();
 
         // Measure Key-Value operations
@@ -149,21 +151,11 @@ public class IgniteRecordViewExample {
     }
 
     // Table creation methods
-    private static void createUserProfileTables(IgniteClient client) throws Exception {
-        // Key-Value table (user_id duplicated in key and value)
+    private static void createUserProfileTable(IgniteClient client) throws Exception {
+        // Single table schema used by both KeyValueView and RecordView
+        client.sql().execute(null, "DROP TABLE IF EXISTS user_profiles");
         client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS user_profiles_kv (" +
-                        "user_id VARCHAR PRIMARY KEY," +
-                        "user_id_dup VARCHAR," +  // Duplicated field
-                        "name VARCHAR," +
-                        "email VARCHAR," +
-                        "age INTEGER," +
-                        "department VARCHAR)"
-        );
-
-        // Record table (user_id only in primary key)
-        client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS user_profiles_record (" +
+                "CREATE TABLE user_profiles (" +
                         "user_id VARCHAR PRIMARY KEY," +
                         "name VARCHAR," +
                         "email VARCHAR," +
@@ -172,21 +164,11 @@ public class IgniteRecordViewExample {
         );
     }
 
-    private static void createProductCatalogTables(IgniteClient client) throws Exception {
-        // Key-Value approach
+    private static void createProductCatalogTable(IgniteClient client) throws Exception {
+        // Single table schema used by both KeyValueView and RecordView
+        client.sql().execute(null, "DROP TABLE IF EXISTS products");
         client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS products_kv (" +
-                        "product_id VARCHAR PRIMARY KEY," +
-                        "product_id_dup VARCHAR," +  // Duplicated field
-                        "name VARCHAR," +
-                        "category VARCHAR," +
-                        "price DOUBLE," +
-                        "inventory INTEGER)"
-        );
-
-        // Record approach
-        client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS products_record (" +
+                "CREATE TABLE products (" +
                         "product_id VARCHAR PRIMARY KEY," +
                         "name VARCHAR," +
                         "category VARCHAR," +
@@ -195,21 +177,11 @@ public class IgniteRecordViewExample {
         );
     }
 
-    private static void createPerformanceTables(IgniteClient client) throws Exception {
-        // Key-Value performance test table
+    private static void createPerformanceTable(IgniteClient client) throws Exception {
+        // Single table schema used by both KeyValueView and RecordView
+        client.sql().execute(null, "DROP TABLE IF EXISTS perf_test");
         client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS perf_test_kv (" +
-                        "test_id VARCHAR PRIMARY KEY," +
-                        "test_id_dup VARCHAR," +  // Duplicated field
-                        "data1 VARCHAR," +
-                        "data2 VARCHAR," +
-                        "data3 INTEGER," +
-                        "created_time BIGINT)"
-        );
-
-        // Record performance test table
-        client.sql().execute(null,
-                "CREATE TABLE IF NOT EXISTS perf_test_record (" +
+                "CREATE TABLE perf_test (" +
                         "test_id VARCHAR PRIMARY KEY," +
                         "data1 VARCHAR," +
                         "data2 VARCHAR," +
@@ -222,7 +194,6 @@ public class IgniteRecordViewExample {
     private static void storeUserWithKeyValue(KeyValueView<Tuple, Tuple> view, String userId, String name, String email, int age, String department) {
         Tuple key = Tuple.create().set("user_id", userId);
         Tuple value = Tuple.create()
-                .set("user_id_dup", userId)  // Data duplication
                 .set("name", name)
                 .set("email", email)
                 .set("age", age)
@@ -233,7 +204,7 @@ public class IgniteRecordViewExample {
 
     private static void storeUserWithRecord(RecordView<Tuple> view, String userId, String name, String email, int age, String department) {
         Tuple record = Tuple.create()
-                .set("user_id", userId)  // No duplication
+                .set("user_id", userId)  // Primary key included in record
                 .set("name", name)
                 .set("email", email)
                 .set("age", age)
@@ -246,7 +217,7 @@ public class IgniteRecordViewExample {
         Tuple key = Tuple.create().set("user_id", userId);
         Tuple value = view.get(null, key);
         if (value != null) {
-            // Need to merge key and value to get complete record
+            // KeyValueView returns only the value, must manually merge with key to get complete record
             return Tuple.create()
                     .set("user_id", userId)
                     .set("name", value.stringValue("name"))
@@ -259,15 +230,15 @@ public class IgniteRecordViewExample {
 
     private static Tuple getUserWithRecord(RecordView<Tuple> view, String userId) {
         Tuple key = Tuple.create().set("user_id", userId);
-        return view.get(null, key);  // Complete record in single operation
+        return view.get(null, key);  // RecordView returns complete record including primary key
     }
 
     private static void updateUserEmailKeyValue(KeyValueView<Tuple, Tuple> view, String userId, String newEmail) {
         Tuple key = Tuple.create().set("user_id", userId);
         Tuple currentValue = view.get(null, key);
         if (currentValue != null) {
+            // KeyValueView requires rebuilding entire value Tuple for updates
             Tuple updatedValue = Tuple.create()
-                    .set("user_id_dup", userId)  // Must maintain duplication
                     .set("name", currentValue.stringValue("name"))
                     .set("email", newEmail)
                     .set("age", currentValue.intValue("age"))
@@ -281,10 +252,11 @@ public class IgniteRecordViewExample {
         Tuple key = Tuple.create().set("user_id", userId);
         Tuple currentRecord = view.get(null, key);
         if (currentRecord != null) {
+            // RecordView also requires full record for updates
             Tuple updatedRecord = Tuple.create()
                     .set("user_id", userId)
                     .set("name", currentRecord.stringValue("name"))
-                    .set("email", newEmail)  // Simple field update
+                    .set("email", newEmail)
                     .set("age", currentRecord.intValue("age"))
                     .set("department", currentRecord.stringValue("department"));
             view.replace(null, updatedRecord);
@@ -303,7 +275,6 @@ public class IgniteRecordViewExample {
         for (String[] product : products) {
             Tuple key = Tuple.create().set("product_id", product[0]);
             Tuple value = Tuple.create()
-                    .set("product_id_dup", product[0])  // Duplication
                     .set("name", product[1])
                     .set("category", product[2])
                     .set("price", Double.parseDouble(product[3]))
@@ -322,7 +293,7 @@ public class IgniteRecordViewExample {
 
         for (String[] product : products) {
             Tuple record = Tuple.create()
-                    .set("product_id", product[0])  // No duplication
+                    .set("product_id", product[0])  // Primary key included in record
                     .set("name", product[1])
                     .set("category", product[2])
                     .set("price", Double.parseDouble(product[3]))
@@ -360,7 +331,6 @@ public class IgniteRecordViewExample {
             Tuple currentValue = view.get(null, key);
             if (currentValue != null) {
                 Tuple updatedValue = Tuple.create()
-                        .set("product_id_dup", productIds[i])  // Maintain duplication
                         .set("name", currentValue.stringValue("name"))
                         .set("category", currentValue.stringValue("category"))
                         .set("price", newPrices[i])
@@ -380,7 +350,7 @@ public class IgniteRecordViewExample {
             Tuple currentRecord = view.get(null, key);
             if (currentRecord != null) {
                 Tuple updatedRecord = Tuple.create()
-                        .set("product_id", productIds[i])  // No duplication concerns
+                        .set("product_id", productIds[i])  // Primary key included in record
                         .set("name", currentRecord.stringValue("name"))
                         .set("category", currentRecord.stringValue("category"))
                         .set("price", newPrices[i])
@@ -397,7 +367,6 @@ public class IgniteRecordViewExample {
             String testId = "test_" + i;
             Tuple key = Tuple.create().set("test_id", testId);
             Tuple value = Tuple.create()
-                    .set("test_id_dup", testId)  // Duplication overhead
                     .set("data1", "test_data_" + i)
                     .set("data2", "more_data_" + i)
                     .set("data3", i)
@@ -414,7 +383,7 @@ public class IgniteRecordViewExample {
         for (int i = 0; i < count; i++) {
             String testId = "test_" + i;
             Tuple record = Tuple.create()
-                    .set("test_id", testId)  // No duplication
+                    .set("test_id", testId)  // Primary key included in record
                     .set("data1", "test_data_" + i)
                     .set("data2", "more_data_" + i)
                     .set("data3", i)
@@ -429,11 +398,12 @@ public class IgniteRecordViewExample {
     }
 
     private static void analyzeMemoryUsage() {
-        System.out.println("Memory Usage Analysis:");
-        System.out.println("- Key-Value approach duplicates primary key data in both key and value");
-        System.out.println("- Record approach stores primary key only once per record");
-        System.out.println("- For 1000 records with 10-character keys: ~10KB savings with Record View");
-        System.out.println("- Record View also reduces application complexity and potential inconsistencies");
+        System.out.println("API Comparison Summary:");
+        System.out.println("- Both KeyValueView and RecordView use identical table schemas");
+        System.out.println("- KeyValueView: Separates key and value in API calls, value does not contain key fields");
+        System.out.println("- RecordView: Uses single record containing all fields including primary key");
+        System.out.println("- RecordView simplifies code when primary key is part of the domain object");
+        System.out.println("- KeyValueView is useful when using surrogate keys or separate key/value concepts");
     }
 
     // Utility methods

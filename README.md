@@ -20,7 +20,7 @@ Apache Ignite 3 provides Redis-like data structure operations through the Table 
 9. **Data Colocation** - Composite keys for automatic data colocation
 10. **Serialization** - JSON and Java serialization patterns
 11. **Large Objects** - Document and file storage with compression
-12. **Record View** - Comparison with KeyValueView for data efficiency
+12. **Record View** - API design comparison with KeyValueView
 
 ## Key Differences from Redis
 
@@ -433,28 +433,51 @@ processCompressedDataStream(xmlData, "Processing XML report");
 
 ## 12. Record View (IgniteRecordViewExample.java)
 
-Record View API comparison with KeyValueView to eliminate data duplication.
+Comparison of KeyValueView and RecordView API designs using the same table schema.
+
+Both APIs work with identical table structures. KeyValueView separates key and value in method calls, while RecordView treats the entire row as a single record. RecordView simplifies operations when the primary key is part of the domain object.
 
 ### Record View Operations
 
 ```java
-// Key-Value approach (with data duplication)
+// Same table schema for both approaches
+client.sql().execute(null,
+    "CREATE TABLE user_profiles (" +
+    "user_id VARCHAR PRIMARY KEY," +
+    "name VARCHAR," +
+    "email VARCHAR," +
+    "age INTEGER," +
+    "department VARCHAR)");
+
+// KeyValueView approach (separate key and value parameters)
+KeyValueView<Tuple, Tuple> kvView = client.tables()
+    .table("user_profiles")
+    .keyValueView();
+
 Tuple key = Tuple.create().set("user_id", "alice");
 Tuple value = Tuple.create()
-        .set("user_id_dup", "alice")  // Duplicated field
-        .set("name", "Alice Johnson")
-        .set("email", "alice@example.com");
+    .set("name", "Alice Johnson")
+    .set("email", "alice@example.com")
+    .set("age", 28)
+    .set("department", "Engineering");
 kvView.put(null, key, value);
 
-// Record approach (no data duplication)
+// RecordView approach (single record parameter with primary key)
+RecordView<Tuple> recordView = client.tables()
+    .table("user_profiles")
+    .recordView();
+
 Tuple record = Tuple.create()
-        .set("user_id", "alice")  // No duplication
-        .set("name", "Alice Johnson")
-        .set("email", "alice@example.com");
+    .set("user_id", "alice")  // Primary key included in record
+    .set("name", "Alice Johnson")
+    .set("email", "alice@example.com")
+    .set("age", 28)
+    .set("department", "Engineering");
 recordView.insert(null, record);
 
-// Complete record retrieval in single operation
-Tuple user = recordView.get(null, Tuple.create().set("user_id", "alice"));
+// Retrieval differences
+Tuple kvResult = kvView.get(null, key);  // Returns only value fields
+Tuple recordResult = recordView.get(null, key);  // Returns complete record including key
 ```
 
 ### Running the Example
